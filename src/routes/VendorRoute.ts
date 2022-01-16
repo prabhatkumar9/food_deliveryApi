@@ -1,7 +1,8 @@
 import express, { Request, Response } from 'express';
 import {
     loginVendor, GetVendorProfile, UpdateVendorProfile,
-    UpdateVendorService, AddFood, GetFoods, UpdateVendorCoverImage
+    UpdateVendorService, AddFood, GetFoods, UpdateVendorCoverImage,
+    GetCurrentOrders, GetOrderDetails, ProcessOrder
 } from '../controllers/VendorController';
 import { Authenticate } from '../middlewares/index';
 import multer from 'multer';
@@ -43,8 +44,15 @@ router.get('/foods', GetFoods);
 router.post('/food', images, AddFood);
 router.post('/coverImage', images, UpdateVendorCoverImage);
 
+/**
+ * Orders Processing
+ */
+router.get('/orders', GetOrderDetails);
+router.put('/order/:id/process', ProcessOrder);
+router.get('/order/:id', GetCurrentOrders);
 
-// ******** protected routes ***********
+
+// ******** end protected routes ***********
 
 
 router.get('/', (req: Request, res: Response) => {

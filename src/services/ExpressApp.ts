@@ -8,8 +8,10 @@ export default async (app: Application) => {
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
 
+    const imagePath = path.join(__dirname, '../images');
+
     //  help to access images from sever to client side
-    app.use('images', express.static(path.join(__dirname, 'images')));
+    app.use('images', express.static(imagePath));
 
     app.use('/admin', AdminRoute);
     app.use('/vendor', VendorRoute);

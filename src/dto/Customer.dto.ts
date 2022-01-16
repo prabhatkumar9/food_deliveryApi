@@ -29,7 +29,12 @@ export class UserLoginInputs {
 
     @IsEmail()
     email: string;
- 
+
     password: string;
- 
+
+}
+
+export class OrderInputs {
+    _id: string;
+    unit: number
 }

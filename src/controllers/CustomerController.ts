@@ -1,8 +1,8 @@
 import { plainToClass } from 'class-transformer';
 import { validate } from 'class-validator';
 import { Request, Response } from 'express';
-import { CreateCustomerInputs, UserLoginInputs } from '../dto/Customer.dto';
-import { Customer, CustomerDoc } from '../models';
+import { CreateCustomerInputs, OrderInputs, UserLoginInputs } from '../dto/Customer.dto';
+import { Customer, CustomerDoc, Food, Order } from '../models';
 import { GenerateOTP, GenerateToken, OnRequestOTP } from '../utility';
 import { PasswordUtil } from '../utility/PasswordUtility';
 
@@ -41,7 +41,8 @@ export const CustomerSignUp = async (req: Request, res: Response) => {
         firstName, lastName,
         address,
         verified: false,
-        lat: 0, lon: 0
+        lat: 0, lon: 0,
+        orders: []
     });
 
     if (result) {
@@ -212,3 +213,169 @@ export const EditCustomerProfile = async (req: Request, res: Response) => {
         return res.status(400).json({ success: false, message: "profile not found !" });
     }
 }
+
+
+/** ----------------- order section ----------------- **/
+export const CreateOrder = async (req: Request, res: Response) => {
+    // grab current login customer
+    const customer = req.user;
+
+    if (customer) {
+        // create order id
+        const orderId = `${new Date().toISOString()}_${Math.floor(Math.random() * 89999) + 1000}`;
+
+        console.log("order id ::: ", orderId);
+
+        const profile = await Customer.findById(customer._id);
+
+        const cart = <[OrderInputs]>req.body;
+        let cartItems = Array();
+        let netAmount = 0.0;
+        let vendorId = '';
+
+        //calculate order amount
+        const foods = await Food.find().where('_id').in(cart.map(item => item._id)).exec();
+
+        foods.map(food => {
+            cart.map(({ _id, unit }) => {
+                if (food._id == _id) {
+                    vendorId = food.vendorId;
+                    netAmount += (food.price * unit);
+                    cartItems.push({ food, unit });
+                }
+            });
+        });
+
+        // create order with item description
+        if (cartItems) {
+            const currentOrder = await Order.create({
+                orderId: orderId,
+                vendorId: vendorId,
+                items: cartItems,
+                totalAmount: netAmount,
+                orderDate: new Date(),
+                paidThrough: 'COD',
+                paymentResponse: '',
+                orderStatus: 'WAITING',
+                remarks: '',
+                deliveryId: '',
+                appliedOffer: '',
+                offerId: '',
+                readyTime: 45,
+            });
+
+            // update user
+            if (currentOrder) {
+
+                profile.cart = [] as any;
+                profile.orders.push(currentOrder);
+                const savedResult = await profile.save();
+
+                return res.status(200).json({ data: savedResult, message: "Order placed !", success: true });
+            }
+
+            return res.status(200).json({ message: "Order Fail !", success: false });
+        }
+
+        return res.status(200).json({ message: "Cart is empty !", success: false });
+    }
+}
+
+export const GetOrders = async (req: Request, res: Response) => {
+    const customer = req.user;
+    if (customer) {
+        const profile = await Customer.findById(customer._id).populate('orders');
+
+        if (profile) {
+            return res.status(200).json({ data: profile.orders, success: true });
+        }
+
+        return res.status(200).json({ message: "No orders found..!", success: false });
+    }
+}
+
+export const GetOrderById = async (req: Request, res: Response) => {
+    const orderId = req.params.id;
+    if (orderId) {
+        const order = await Order.findById(orderId);
+
+        if (order) {
+            return res.status(200).json({ data: order, success: true });
+        }
+
+        return res.status(200).json({ message: "Order not found..!", success: false });
+    }
+}
+
+/** ----------------- cart section ----------------- **/
+export const AddToCart = async (req: Request, res: Response) => {
+    // grab current login customer
+    const customer = req.user;
+
+    if (customer) {
+
+        const profile = await Customer.findById(customer._id).populate('cart.food');
+        const { _id, unit } = <OrderInputs>req.body;
+        let cartItems = Array();
+        let netAmount = 0.0;
+
+        //calculate order amount
+        const food = await Food.findById(_id);
+
+        if (food) {
+            if (profile != null) {
+
+                // check cart items
+                cartItems = profile.cart;
+
+                if (cartItems.length > 0) {
+                    // update cart
+                    let existingFood = cartItems.filter((item) => item.food._id.toString() === _id);
+
+                    if (existingFood.length > 0) {
+                        const index = cartItems.indexOf(existingFood[0]);
+                        if (unit > 0) {
+                            cartItems[index] = { food, unit };
+                        } else {
+                            cartItems.splice(index, 1);
+                        }
+                    }
+                } else {
+                    cartItems.push({ food, unit });
+                }
+            }
+        }
+
+        return res.status(200).json({ message: "Unable to create cart!", success: false });
+    }
+}
+
+export const GetCart = async (req: Request, res: Response) => {
+    const customer = req.user;
+    if (customer) {
+
+        const profile = await Customer.findById(customer._id).populate('cart.food');
+        if (profile) {
+            return res.status(200).json({ success: true, data: profile.cart });
+        }
+
+        return res.status(400).json({ message: "Cart is empty !", success: false });
+    }
+}
+
+export const DeleteCart = async (req: Request, res: Response) => {
+    const customer = req.user;
+    if (customer) {
+
+        const profile = await Customer.findById(customer._id).populate('cart.food');
+        if (profile != null) {
+            profile.cart = [] as any;
+
+            const cartResult = profile.save();
+            return res.status(200).json({ success: true, data: cartResult });
+        }
+
+        return res.status(400).json({ message: "Cart is already empty !", success: false });
+    }
+}
+

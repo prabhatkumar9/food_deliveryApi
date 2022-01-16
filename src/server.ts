@@ -11,7 +11,7 @@ const StartServer = async () => {
     await App(app);
 
     app.listen(PORT, () => {
-        console.log(`App is running at Port ::: ${PORT} ::::`);
+        console.log(`App is running at local Port ::: ${PORT} ::::`);
     });
 }
 

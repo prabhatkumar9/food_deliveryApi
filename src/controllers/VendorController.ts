@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { EditVendorInput, VendorLoginInput } from '../dto/CreateVendorInput';
 import { CreateFoodInputs } from '../dto/food.dto';
-import { Food } from '../models';
+import { Food, Order } from '../models';
 import { GenerateToken } from '../utility/authentication';
 import { PasswordUtil } from '../utility/PasswordUtility';
 import { FindVendor } from './AdminController';
@@ -147,4 +147,65 @@ export const GetFoods = async (req: Request, res: Response) => {
         }
     }
     return res.json({ message: "Foods info not found..!", success: false });
+}
+
+/**
+ * Orders Processing
+ */
+
+export const GetCurrentOrders = async (req: Request, res: Response) => {
+    const user = req.user;
+
+    if (user) {
+        const orders = await Order.find({ vendorId: user._id }).populate('item.food');
+
+        if (orders != null) {
+            return res.status(200).json({ success: true, data: orders });
+        }
+
+        return res.status(200).json({ success: false, message: "No orders available !" });
+    }
+}
+
+export const GetOrderDetails = async (req: Request, res: Response) => {
+    const orderId = req.params.id;
+
+    if (orderId) {
+        const order = await Order.findById(orderId).populate('item.food');
+
+        if (order != null) {
+            return res.status(200).json({ success: true, data: order });
+        }
+
+        return res.status(200).json({ success: false, message: "order not found !" });
+    }
+}
+
+export const ProcessOrder = async (req: Request, res: Response) => {
+    // WAITING // ACCEPT // REJECT / FAILED / UNDER-PROCESS / RAEDY
+
+    const orderId = req.params.id;
+
+    const { status, remarks, time } = req.body;
+
+    if (orderId) {
+        const order = await Order.findById(orderId).populate('food');
+
+        order.orderStatus = status;
+        order.remarks = remarks;
+
+        if (time) {
+            order.readyTime = time;
+        }
+
+        const orderResult = await order.save();
+
+        if (orderResult) {
+            return res.status(200).json({ success: true, data: orderResult });
+        }
+    }
+
+    return res.status(400).json({ success: false, message: "Unable to process order..!" });
+
+
 }
