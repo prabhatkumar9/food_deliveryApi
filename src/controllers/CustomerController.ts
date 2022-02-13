@@ -1,8 +1,8 @@
 import { plainToClass } from 'class-transformer';
 import { validate } from 'class-validator';
 import { Request, Response } from 'express';
-import { CreateCustomerInputs, OrderInputs, UserLoginInputs } from '../dto/Customer.dto';
-import { Customer, CustomerDoc, Food, Order } from '../models';
+import { CartItem, CreateCustomerInputs, OrderInputs, UserLoginInputs } from '../dto/Customer.dto';
+import { Customer, CustomerDoc, DeliveryUser, Food, Offer, Order, Transaction, Vendor } from '../models';
 import { GenerateOTP, GenerateToken, OnRequestOTP } from '../utility';
 import { PasswordUtil } from '../utility/PasswordUtility';
 
@@ -202,7 +202,7 @@ export const EditCustomerProfile = async (req: Request, res: Response) => {
             profile.lastName = lastName;
             profile.address = address;
 
-            const result = await profile?.save();
+            const result = await profile.save();
             if (result) {
                 return res.status(200).json({ success: true, data: result });
             }
@@ -216,11 +216,32 @@ export const EditCustomerProfile = async (req: Request, res: Response) => {
 
 
 /** ----------------- order section ----------------- **/
+
+export const ValidateTxn = async (txnId: string) => {
+    const currentTransaction = await Transaction.findById(txnId);
+    if (currentTransaction) {
+        if (currentTransaction.status.toLowerCase() !== "failed") {
+            return { status: true, currentTransaction };
+        }
+    }
+
+    return { status: false, currentTransaction };
+}
+
 export const CreateOrder = async (req: Request, res: Response) => {
     // grab current login customer
     const customer = req.user;
+    const { items, txnId, amount } = <OrderInputs>req.body;
 
     if (customer) {
+
+        /** validate txn */
+        const { status, currentTransaction } = await ValidateTxn(txnId);
+
+        if (!status) {
+            return res.status(400).json({ message: "Payment is not confirmed !, Unalbe to create Order!", success: false });
+        }
+
         // create order id
         const orderId = `${new Date().toISOString()}_${Math.floor(Math.random() * 89999) + 1000}`;
 
@@ -228,16 +249,15 @@ export const CreateOrder = async (req: Request, res: Response) => {
 
         const profile = await Customer.findById(customer._id);
 
-        const cart = <[OrderInputs]>req.body;
         let cartItems = Array();
         let netAmount = 0.0;
         let vendorId = '';
 
         //calculate order amount
-        const foods = await Food.find().where('_id').in(cart.map(item => item._id)).exec();
+        const foods = await Food.find().where('_id').in(items.map(item => item._id)).exec();
 
         foods.map(food => {
-            cart.map(({ _id, unit }) => {
+            items.map(({ _id, unit }) => {
                 if (food._id == _id) {
                     vendorId = food.vendorId;
                     netAmount += (food.price * unit);
@@ -253,23 +273,29 @@ export const CreateOrder = async (req: Request, res: Response) => {
                 vendorId: vendorId,
                 items: cartItems,
                 totalAmount: netAmount,
+                paidAmount: amount,
                 orderDate: new Date(),
-                paidThrough: 'COD',
-                paymentResponse: '',
                 orderStatus: 'WAITING',
                 remarks: '',
                 deliveryId: '',
-                appliedOffer: '',
-                offerId: '',
                 readyTime: 45,
             });
 
             // update user
             if (currentOrder) {
 
+                /** save profile */
                 profile.cart = [] as any;
                 profile.orders.push(currentOrder);
                 const savedResult = await profile.save();
+
+                /** SAVE txn status  */
+                currentTransaction.vendorId = vendorId;
+                currentTransaction.orderId = orderId;
+                currentTransaction.status = "CONFIRMED";
+                await currentTransaction.save();
+
+                AssignOrderForDelivery(currentOrder._id, vendorId);
 
                 return res.status(200).json({ data: savedResult, message: "Order placed !", success: true });
             }
@@ -315,7 +341,7 @@ export const AddToCart = async (req: Request, res: Response) => {
     if (customer) {
 
         const profile = await Customer.findById(customer._id).populate('cart.food');
-        const { _id, unit } = <OrderInputs>req.body;
+        const { _id, unit } = <CartItem>req.body;
         let cartItems = Array();
         let netAmount = 0.0;
 
@@ -379,3 +405,98 @@ export const DeleteCart = async (req: Request, res: Response) => {
     }
 }
 
+
+/**
+ * VerifyOffer
+ */
+export const VerifyOffer = async (req: Request, res: Response) => {
+    const offerId = req.params.id;
+    const user = req.user;
+
+    if (user) {
+        const appliedOffer = await Offer.findById(offerId);
+
+        if (appliedOffer) {
+            if (appliedOffer.isActive) {
+                return res.status(200).json({
+                    message: "Offer is valid",
+                    data: appliedOffer, success: true
+                });
+            }
+        }
+
+        return res.status(200).json({ message: "Offer is not valid", success: false });
+
+    }
+}
+
+/**
+ * CreatePayment
+ */
+export const CreatePayment = async (req: Request, res: Response) => {
+    const customer = req.user;
+    const { amount, paymentMode, offerId } = req.body;
+
+    let payableAmount = Number(amount);
+    /** dedcut offer amount from total */
+    if (offerId) {
+        const appliedOffer = await Offer.findById(offerId);
+        if (appliedOffer) {
+            if (appliedOffer.isActive) {
+                payableAmount = (payableAmount - appliedOffer.offerAmount);
+            }
+        }
+    }
+
+    /** Perform Payment gateway Charge API call */
+
+
+    /** right after payment gateway success / failure response */
+
+
+    /** Create record on transaction */
+    const transaction = await Transaction.create({
+        customerId: customer._id,
+        vendorId: '',
+        orderId: '',
+        orderValue: payableAmount,
+        offerUsed: offerId || "NA",
+        status: "OPEN",
+        paymentMode: paymentMode,
+        paymentResponse: "Payment is cash on delivery"
+    });
+
+    return res.status(200).json({ success: true, data: transaction });
+
+}
+
+
+/** ------ Delivery Notification Section ------ */
+
+const AssignOrderForDelivery = async (order_id: string, vendorId: string) => {
+    const vendor = await Vendor.findById(vendorId);
+
+    if (vendor) {
+        const areaCode = vendor.pincode;
+        const vendorLat = vendor.lat;
+        const vendorLon = vendor.lon;
+
+        /** find nearest available delivery person */
+        const deliveryPerons = await DeliveryUser.find({ pincode: areaCode, verified: true, isAvailable: true })
+
+        if (deliveryPerons) {
+            /**  */
+
+            const currentOrder = await Order.findById(order_id);
+
+            if (currentOrder) {
+
+                // update deliveryid
+                // assing delivery person id to currentorder deliveryid 
+                currentOrder.deliveryId = deliveryPerons[0]._id;
+                await currentOrder.save();
+            }
+        }
+
+    }
+}

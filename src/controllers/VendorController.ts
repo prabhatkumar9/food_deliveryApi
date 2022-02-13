@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
 import { EditVendorInput, VendorLoginInput } from '../dto/CreateVendorInput';
 import { CreateFoodInputs } from '../dto/food.dto';
-import { Food, Order } from '../models';
+import { OfferDTO } from '../dto/Offer.dto';
+import { Food, Offer, Order } from '../models';
 import { GenerateToken } from '../utility/authentication';
 import { PasswordUtil } from '../utility/PasswordUtility';
 import { FindVendor } from './AdminController';
@@ -89,10 +90,17 @@ export const UpdateVendorCoverImage = async (req: Request, res: Response) => {
 
 export const UpdateVendorService = async (req: Request, res: Response) => {
     const user = req.user;
+    const { lat, lon } = req.body;
+
     if (user) {
         const existingUser: any = await FindVendor(user._id);
         if (existingUser != null) {
             existingUser.serviceAvailable = !existingUser.serviceAvailable;
+
+            if (lat && lon) {
+                existingUser.lat = lat;
+                existingUser.lon = lon;
+            }
 
             const saveResult = await existingUser.save();
             return res.json({ message: "updated", data: saveResult, success: true });
@@ -206,6 +214,128 @@ export const ProcessOrder = async (req: Request, res: Response) => {
     }
 
     return res.status(400).json({ success: false, message: "Unable to process order..!" });
+
+
+}
+
+/**
+ * offers
+ */
+export const GetOffers = async (req: Request, res: Response) => {
+    const user = req.user;
+
+    const offers = await Offer.find().populate('vendors');
+
+    if (user) {
+
+        let currentOffers = Array();
+
+        offers.map(item => {
+            if (item.vendors) {
+                item.vendors.map(vendor => {
+                    if (vendor._id.toString() == user._id) {
+                        currentOffers.push(item);
+                    }
+                });
+            }
+
+            if (item.offerType == "GENERIC") {
+                currentOffers.push(item);
+            }
+
+        });
+
+        return res.status(200).json({ data: currentOffers, success: true });
+
+    }
+
+    return res.status(400).json({ message: "Unable to get Offers !", success: false });
+}
+
+export const AddOffer = async (req: Request, res: Response) => {
+    const user = req.user;
+    const {
+        offerType, title, description,
+        minValue, offerAmount, startValidity, endValidity,
+        promoCode, promoType, bank, bins, pincode, isActive
+    } = <OfferDTO>req.body;
+
+    if (user) {
+
+        const vendor = await FindVendor(user._id);
+
+        if (vendor) {
+
+            const offer = await Offer.create({
+                offerType, title, vendor: [vendor],
+                description, minValue,
+                offerAmount, startValidity,
+                endValidity, promoCode,
+                promoType, bank, bins,
+                pincode, isActive
+            });
+
+            if (offer != null) {
+                return res.status(200).json({ data: offer, success: true });
+            }
+
+            return res.status(400).json({ message: "Unable to create Offer !", success: false });
+        }
+
+    }
+
+    return res.status(400).json({ message: "Unable to find vendor and create Offer !", success: false });
+}
+
+export const EditOffer = async (req: Request, res: Response) => {
+    const user = req.user;
+    const offerId = req.params.id;
+    const {
+        offerType, title, description,
+        minValue, offerAmount, startValidity, endValidity,
+        promoCode, promoType, bank, bins, pincode, isActive
+    } = <OfferDTO>req.body;
+
+    if (user) {
+
+        const currentOffer = await Offer.findById(offerId);
+
+        if (currentOffer != null) {
+            const vendor = await FindVendor(user._id);
+
+            if (vendor != null) {
+
+                currentOffer.offerType = offerType;
+                currentOffer.title = title;
+                currentOffer.description = description;
+                currentOffer.minValue = minValue;
+                currentOffer.offerAmount = offerAmount;
+                currentOffer.startValidity = startValidity;
+                currentOffer.endValidity = endValidity;
+                currentOffer.promoCode = promoCode;
+                currentOffer.promoType = promoType;
+                currentOffer.bank = bank;
+                currentOffer.bins = bins;
+                currentOffer.pincode = pincode;
+                currentOffer.isActive = isActive;
+
+                const offerResult = await currentOffer.save();
+
+                if (offerResult != null) {
+                    return res.status(200).json({ data: offerResult, success: true });
+                }
+
+                return res.status(400).json({ message: "Unable to update offer !", success: false });
+
+            }
+            return res.status(400).json({ message: "Vendor not found !", success: false });
+        }
+
+        return res.status(400).json({ message: "Offer not found !", success: false });
+
+    }
+
+    return res.status(400).json({ message: "Unable to find vendor !", success: false });
 
 
 }

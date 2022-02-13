@@ -7,6 +7,8 @@ export interface CreateVendorInput {
     phone: string,
     email: string,
     password: string,
+    lat: number,
+    lon: number
     // foods:[],
 }
 

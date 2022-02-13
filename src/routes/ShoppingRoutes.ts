@@ -1,10 +1,11 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express from 'express';
 import {
     GetFoodAvailability,
     GetTopRestaurants,
     GetFoodsIn30Min,
     SearchFood,
-    RestaurantById
+    RestaurantById,
+    GetOffersByPincode
 } from '../controllers/index';
 
 const router = express.Router();
@@ -23,6 +24,9 @@ router.get('/search/:pincode', SearchFood);
 
 /** --------------- Find Restaurant By id -----------------  **/
 router.get('/restaurant/:id', RestaurantById);
+
+/** --------------- Find Offers -----------------  **/
+router.get('/offers/:pincode', GetOffersByPincode);
 
 
 
